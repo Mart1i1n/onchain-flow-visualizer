@@ -2,7 +2,8 @@
 
 静态版包含两套独立功能：
 
-- `index.html`：只显示搜索框，不读取资金流 JSON。
+- `index.html`：首页，展示各链基础数据，右上角是四个功能入口。
+- `track.html`：只显示搜索框，不读取资金流 JSON。
 - `result.html`：接收链和地址，向后端请求该地址的数据并显示结果。
 - `mock-api/`：后端尚未完成时使用的逐地址模拟响应。
 - `live.html`：搜索 ETH、BNB/BSC 或 POL/Polygon。
@@ -12,7 +13,7 @@
 页面流程：
 
 ```text
-index.html
+track.html
   -> 用户选择链并输入地址
   -> result.html?chain=eth&address=0x...
   -> GET 后端接口?chain=eth&address=0x...
@@ -22,7 +23,82 @@ index.html
 
 ## 首页行为
 
-`index.html` 不执行 `fetch()`，只负责：
+`index.html` 是首页，展示四块内容：核心指标条、多链运行状态、稳定币大额转账、重点协议活动。
+
+首页不直接调用 Etherscan。它只向自己的后端请求一个概览 JSON，由后端去调 Etherscan 再汇总返回。首页里的 `BACKEND_API_URL` 为空时显示内置演示数据；填入后端地址后请求真实数据，请求失败时回退到演示数据。这样 Etherscan 的 key 只存在后端，不会暴露在静态页面里。
+
+## 首页后端接口
+
+前端发送：
+
+```http
+GET https://api.example.com/overview
+Accept: application/json
+```
+
+后端返回：
+
+```json
+{
+  "metrics": {
+    "blockNumber": "0x1661f60",
+    "gasOracle": { "SafeGasPrice": "4.2", "ProposeGasPrice": "5.1", "FastGasPrice": "6.8", "suggestBaseFee": "4.05" },
+    "ethPrice": { "ethusd": "4482.16", "ethbtc": "0.0392" },
+    "dailyTx": { "UTCDate": "2026-07-28", "transactionCount": "1284530" },
+    "networkUtilization": { "UTCDate": "2026-07-28", "networkUtilization": "0.5324" }
+  },
+  "chains": [
+    {
+      "chain": "eth",
+      "latestBlock": { "number": "0x1661f60", "gasUsed": "0x11bde28", "gasLimit": "0x1c9c380" },
+      "avgBlockTime": { "UTCDate": "2026-07-28", "blockTime_sec": "12.06" }
+    }
+  ],
+  "largeTransfers": [
+    {
+      "hash": "0x...",
+      "from": "0x...",
+      "to": "0x...",
+      "value": "28600000000000",
+      "tokenSymbol": "USDT",
+      "tokenDecimal": "6",
+      "timeStamp": "1753776000"
+    }
+  ],
+  "protocols": [
+    { "name": "Uniswap V3 工厂", "type": "dex", "address": "0x1F98431c...", "eventCount": 24 }
+  ]
+}
+```
+
+说明：
+
+- `chains` 按 eth、bsc、polygon 各返回一项，`chain` 取值与其他页面一致。
+- `largeTransfers` 是 USDT/USDC 的最近转账，条目结构就是 Etherscan `tokentx` 的原始行。后端可以先按金额过滤；前端也会再过滤一次，只显示折算后不低于 100 万的，最多 8 条。
+- `protocols` 的 `type` 取值为 `dex`、`lending`、`bridge`，前端会显示为中文；`eventCount` 由后端统计得出。
+- 前端页面上不标注数据来源接口；每个字段与 Etherscan V2 API 的对应关系见下表。
+
+## 首页字段与 Etherscan API 对应表
+
+Etherscan V2 统一接口为 `https://api.etherscan.io/v2/api?chainid={id}`，eth 用 `chainid=1`，bsc 用 `chainid=56`，polygon 用 `chainid=137`。标注 Pro 的需要付费 key。
+
+| 响应字段 | Etherscan 接口 | 是否 Pro | 说明 |
+| --- | --- | --- | --- |
+| `metrics.blockNumber` | `module=proxy&action=eth_blockNumber`（chainid=1） | 否 | 原样透传十六进制区块号 |
+| `metrics.gasOracle` | `module=gastracker&action=gasoracle`（chainid=1） | 否 | 原样透传 `result` 对象 |
+| `metrics.ethPrice` | `module=stats&action=ethprice`（chainid=1） | 否 | 原样透传 `result` 对象 |
+| `metrics.dailyTx` | `module=stats&action=dailytx`（chainid=1） | 是 | 取最近一天的那一行 |
+| `metrics.networkUtilization` | `module=stats&action=dailynetutilization`（chainid=1） | 是 | 取最近一天的那一行 |
+| `chains[].latestBlock` | `module=proxy&action=eth_getBlockByNumber&tag=latest&boolean=false` | 否 | 只需 `number`、`gasUsed`、`gasLimit` 三个字段，燃料占用由前端计算 |
+| `chains[].avgBlockTime` | `module=stats&action=dailyavgblocktime` | 是 | 取最近一天的那一行 |
+| `largeTransfers[]` | `module=account&action=tokentx&contractaddress={USDT或USDC}&sort=desc`（chainid=1） | 否 | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7`，USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
+| `protocols[].eventCount` | `module=logs&action=getLogs&address={协议地址}&fromBlock={最新区块-2000}&toBlock=latest`（chainid=1） | 否 | 后端统计返回日志条数。Uniswap V3 工厂 `0x1F98431c8aD98523631AE4a59f267346ea31F984`，Aave V3 资金池 `0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2`，Polygon 跨链桥 `0x40ec5B33f54e0E8A33A975908C5BA1c14e5BbbDf` |
+
+前端每 10 秒向后端请求一次概览 JSON。后端调用 Etherscan 时注意频率限制，免费 key 是每秒 5 次；建议后端对各接口做缓存（区块 10 秒左右，每日统计可以缓存到小时级），不要把前端的每次请求都透传给 Etherscan。
+
+## 地址搜索页行为
+
+`track.html` 不执行 `fetch()`，只负责：
 
 1. 校验链和 EVM 地址。
 2. 跳转到独立结果页。
@@ -240,6 +316,7 @@ python3 -m http.server 8000 --directory static-site
 
 ```text
 http://localhost:8000/index.html
+http://localhost:8000/track.html
 http://localhost:8000/live.html
 ```
 
@@ -249,6 +326,7 @@ http://localhost:8000/live.html
 
 ```text
 index.html
+track.html
 result.html
 mock-api/
 live.html
@@ -264,6 +342,7 @@ mock-live/
 
 ```text
 index.html
+track.html
 result.html
 live.html
 live-result.html

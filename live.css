@@ -26,6 +26,7 @@
 
 html {
   min-width: 320px;
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -73,18 +74,6 @@ a {
   font-weight: 800;
   gap: 10px;
   text-decoration: none;
-}
-
-.site-brand-mark {
-  align-items: center;
-  background: var(--ink);
-  border-radius: 6px;
-  color: #ffffff;
-  display: inline-flex;
-  font-size: 0.76rem;
-  height: 32px;
-  justify-content: center;
-  width: 32px;
 }
 
 .tool-nav {
@@ -1474,12 +1463,13 @@ a {
 @media (max-width: 680px) {
   .site-header {
     align-items: flex-start;
+    flex-wrap: wrap;
     gap: 14px;
     padding: 13px 16px;
   }
 
-  .site-brand > span:last-child {
-    display: none;
+  .site-brand {
+    font-size: 0.85rem;
   }
 
   .tool-nav {
